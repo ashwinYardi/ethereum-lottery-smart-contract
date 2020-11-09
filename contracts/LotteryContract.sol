@@ -77,12 +77,14 @@ contract LotteryContract {
     }
 
 
-    function settleLottery() internal {
-        require(msg.sender == adminAddress, "Lottery Settlement Requires Admin Access");
-        uint256 adminFees = totalLotteryPool * rulesConfig.adminFeePercentage;
+       function settleLottery() internal {
+        require(msg.sender == adminAddress, "Requires Admin Access");
+        uint256 adminFees = (totalLotteryPool * rulesConfig.adminFeePercentage)/100;
         uint256 winnersPool = (totalLotteryPool - adminFees) /  rulesConfig.numOfWinners;
-
-        for (uint256 i = 0; i <= rulesConfig.numOfWinners; i++) {
+        //temporary logic till we put the random number logic
+        uint winningIndex = 0;
+        winners.push(lotteryPlayers[winningIndex]);
+        for (uint256 i = 0; i < rulesConfig.numOfWinners; i++) {
             address winnerAddress = winners[i];
             lotteryToken.transferFrom(
                 address(this),
