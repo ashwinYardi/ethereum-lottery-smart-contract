@@ -16,10 +16,13 @@
  * public/private key pairs. If you're publishing your code to GitHub make sure you load this
  * phrase from a file you've .gitignored so it doesn't accidentally become public.
  *
+ * 
  */
 
-// const HDWalletProvider = require('@truffle/hdwallet-provider');
-// const infuraKey = "fj4jll3k.....";
+const HDWalletProvider = require('truffle-hdwallet-provider-privkey');
+const privateKey = "<PRIVATE KEY FROM METAMASK>";
+const endpointUrl = "https://kovan.infura.io/v3/b946a0322c834adc9ea6e791f641324b";
+
 //
 // const fs = require('fs');
 // const mnemonic = fs.readFileSync(".secret").toString().trim();
@@ -47,6 +50,20 @@ module.exports = {
       port: 8545,            // Standard Ethereum port (default: none)
       network_id: "*",       // Any network (default: none)
     },
+    kovan: {
+      provider: function () {
+        return new HDWalletProvider(
+          //private keys array
+          [privateKey],
+          //url to ethereum node
+          endpointUrl
+        )
+      },
+      gas: 5000000,
+      gasPrice: 25000000000,
+      network_id: 42
+    }
+
     // Another network with more advanced options...
     // advanced: {
     // port: 8777,             // Custom port
