@@ -4,12 +4,13 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@chainlink/contracts/src/v0.6/VRFConsumerBase.sol";
 
 contract LotteryContract is VRFConsumerBase {
-    struct RulesConfig {
+    struct LotteryConfig {
         uint256 numOfWinners;
-        uint256 playerLimit;
+        uint256 playersLimit;
         uint256 registrationAmount;
         uint256 adminFeePercentage;
-        address tokenAddress;
+        address lotteryTokenAddress;
+        uint256 randomSeed;
     }
 
     address[] lotteryPlayers;
@@ -21,7 +22,7 @@ contract LotteryContract is VRFConsumerBase {
 
     IERC20 lotteryToken;
     LotteryStatus lotteryStatus;
-    RulesConfig rulesConfig;
+    LotteryConfig lotteryConfig;
 
     bytes32 internal keyHashVRF;
     uint256 internal feeVRF;
@@ -37,13 +38,12 @@ contract LotteryContract is VRFConsumerBase {
         adminAddress = msg.sender;
         lotteryStatus = LotteryStatus.NOTSTARTED;
         totalLotteryPool = 0;
-
         keyHashVRF = 0x6c3699283bda56ad74f6b855546325b68d482e983852a7a82979cc4807b641f4;
         feeVRF = 0.1 * 10**18; // 0.1 LINK
     }
 
-    function getRandomNumber(uint256 userProvidedSeed)
-        public
+    function getRandomNumberChainlink(uint256 userProvidedSeed)
+        internal
         returns (bytes32 requestId)
     {
         require(
@@ -62,10 +62,11 @@ contract LotteryContract is VRFConsumerBase {
 
     function setLotteryRules(
         uint256 numOfWinners,
-        uint256 playerLimit,
+        uint256 playersLimit,
         uint256 registrationAmount,
         uint256 adminFeePercentage,
-        address tokenAddress
+        address lotteryTokenAddress,
+        uint256 randomSeed
     ) public {
         require(
             msg.sender == adminAddress,
@@ -75,20 +76,24 @@ contract LotteryContract is VRFConsumerBase {
             lotteryStatus == LotteryStatus.NOTSTARTED,
             "Starting the Lottery requires Admin Access"
         );
-        rulesConfig = RulesConfig(
+        lotteryConfig = LotteryConfig(
             numOfWinners,
-            playerLimit,
+            playersLimit,
             registrationAmount,
             adminFeePercentage,
-            tokenAddress
+            lotteryTokenAddress,
+            randomSeed
         );
         lotteryStatus = LotteryStatus.INPROGRESS;
-        lotteryToken = IERC20(tokenAddress);
+        lotteryToken = IERC20(lotteryTokenAddress);
+        //if chainlink takes time we go with blockchain approach
+        randomResult = getRandomNumberBlockchain();
+        // getRandomNumberChainlink(randomSeed);
     }
 
     function enterLottery() public returns (bool) {
         require(
-            lotteryPlayers.length < rulesConfig.playerLimit,
+            lotteryPlayers.length < lotteryConfig.playersLimit,
             "Max Participation for the Lottery Reached"
         );
         //add condition if address has already entered
@@ -98,40 +103,74 @@ contract LotteryContract is VRFConsumerBase {
         );
         require(
             lotteryToken.allowance(msg.sender, address(this)) >=
-                rulesConfig.registrationAmount,
+                lotteryConfig.registrationAmount,
             "Contract is not allowed to spend this"
         );
         lotteryPlayers.push(msg.sender);
         lotteryToken.transferFrom(
             msg.sender,
             address(this),
-            rulesConfig.registrationAmount
+            lotteryConfig.registrationAmount
         );
-        //if condition here to close lottery after max participation
-        totalLotteryPool += rulesConfig.registrationAmount;
+        totalLotteryPool += lotteryConfig.registrationAmount;
+        if (lotteryPlayers.length == lotteryConfig.playersLimit) {
+            settleLottery();
+        }
         return true;
     }
 
     function settleLottery() internal {
-        require(msg.sender == adminAddress, "Requires Admin Access");
+        // require(msg.sender == adminAddress, "Requires Admin Access");
         uint256 adminFees = (totalLotteryPool *
-            rulesConfig.adminFeePercentage) / 100;
+            lotteryConfig.adminFeePercentage) / 100;
         uint256 winnersPool = (totalLotteryPool - adminFees) /
-            rulesConfig.numOfWinners;
-        //temporary logic till we put the random number logic
-        uint256 winningIndex = 0;
-        winners.push(lotteryPlayers[winningIndex]);
-        for (uint256 i = 0; i < rulesConfig.numOfWinners; i++) {
-            address winnerAddress = winners[i];
-            lotteryToken.transferFrom(
-                address(this),
-                winnerAddress,
-                winnersPool
-            );
+            lotteryConfig.numOfWinners;
+
+        for (uint256 i = 0; i < lotteryConfig.numOfWinners; i++) {
+            uint256 winningIndex = randomResult % lotteryConfig.playersLimit;
+            address userAddress = lotteryPlayers[winningIndex];
+            while (winnerAddresses[userAddress]) {
+                randomResult = randomResult * getRandomNumberBlockchain();
+                winningIndex = randomResult % lotteryConfig.playersLimit;
+                userAddress = lotteryPlayers[winningIndex];
+            }
+            winnerAddresses[userAddress] = true;
+            winners.push(userAddress);
+            lotteryToken.transfer(userAddress, winnersPool);
         }
         //transfer to Admin
-        lotteryToken.transferFrom(address(this), adminAddress, adminFees);
+        lotteryToken.transfer(adminAddress, adminFees);
         lotteryStatus = LotteryStatus.CLOSED;
+    }
+
+    function getRandomNumberBlockchain() internal view returns (uint256) {
+        return
+            uint256(
+                keccak256(abi.encodePacked(block.timestamp, block.difficulty))
+            );
+    }
+
+    function resetLottery() public {
+        require(
+            msg.sender == adminAddress,
+            "Resetting the Lottery requires Admin Access"
+        );
+        require(
+            lotteryStatus == LotteryStatus.CLOSED,
+            "Starting the Lottery requires Admin Access"
+        );
+        delete lotteryConfig;
+        delete adminAddress;
+        delete randomResult;
+        delete lotteryPlayers;
+        delete lotteryStatus;
+        delete keyHashVRF;
+        delete feeVRF;
+        delete totalLotteryPool;
+        for (uint256 i = 0; i < winners.length; i++) {
+            winnerAddresses[winners[i]] = false;
+        }
+        delete winners;
     }
 
     //add logic to reset contract variblaes values
