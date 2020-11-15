@@ -17,16 +17,23 @@ contract LotteryContract is VRFConsumerBase {
     address adminAddress;
     enum LotteryStatus {NOTSTARTED, INPROGRESS, CLOSED}
     mapping(address => bool) winnerAddresses;
-    address[] winners;
+    uint256[] winnerIndexes;
     uint256 totalLotteryPool;
 
     IERC20 lotteryToken;
     LotteryStatus lotteryStatus;
     LotteryConfig lotteryConfig;
 
-    bytes32 internal keyHashVRF;
-    uint256 internal feeVRF;
-    uint256 public randomResult;
+    bytes32 internal keyHash;
+    uint256 internal fee;
+    uint256 internal randomResult;
+    bool internal areWinnersGenerated;
+
+    event MaxParticipationCompleted(address indexed _from);
+    event WinnersGenerated();
+    event LotterySettled();
+    event LotteryStarted();
+    event LotteryReset();
 
     constructor()
         public
@@ -38,19 +45,20 @@ contract LotteryContract is VRFConsumerBase {
         adminAddress = msg.sender;
         lotteryStatus = LotteryStatus.NOTSTARTED;
         totalLotteryPool = 0;
-        keyHashVRF = 0x6c3699283bda56ad74f6b855546325b68d482e983852a7a82979cc4807b641f4;
-        feeVRF = 0.1 * 10**18; // 0.1 LINK
+        keyHash = 0x6c3699283bda56ad74f6b855546325b68d482e983852a7a82979cc4807b641f4;
+        fee = 0.1 * 10**18; // 0.1 LINK
+        areWinnersGenerated = false;
     }
 
-    function getRandomNumberChainlink(uint256 userProvidedSeed)
+    function getRandomNumber(uint256 userProvidedSeed)
         internal
         returns (bytes32 requestId)
     {
         require(
-            LINK.balanceOf(address(this)) > feeVRF,
+            LINK.balanceOf(address(this)) >= fee,
             "Not enough LINK - fill contract with faucet"
         );
-        return requestRandomness(keyHashVRF, feeVRF, userProvidedSeed);
+        return requestRandomness(keyHash, fee, userProvidedSeed);
     }
 
     function fulfillRandomness(bytes32 requestId, uint256 randomness)
@@ -58,6 +66,20 @@ contract LotteryContract is VRFConsumerBase {
         override
     {
         randomResult = randomness;
+        for (uint256 i = 0; i < lotteryConfig.numOfWinners; i++) {
+            uint256 winningIndex = randomResult % lotteryConfig.playersLimit;
+            address userAddress = lotteryPlayers[winningIndex];
+            while (winnerAddresses[userAddress]) {
+                randomResult = randomResult * getRandomNumberBlockchain();
+                winningIndex = randomResult % lotteryConfig.playersLimit;
+                userAddress = lotteryPlayers[winningIndex];
+            }
+            winnerAddresses[userAddress] = true;
+            winnerIndexes.push(winningIndex);
+        }
+        areWinnersGenerated = true;
+        emit WinnersGenerated();
+        settleLottery();
     }
 
     function setLotteryRules(
@@ -74,7 +96,7 @@ contract LotteryContract is VRFConsumerBase {
         );
         require(
             lotteryStatus == LotteryStatus.NOTSTARTED,
-            "Starting the Lottery requires Admin Access"
+            "Error: An existing lottery is in progress"
         );
         lotteryConfig = LotteryConfig(
             numOfWinners,
@@ -86,9 +108,7 @@ contract LotteryContract is VRFConsumerBase {
         );
         lotteryStatus = LotteryStatus.INPROGRESS;
         lotteryToken = IERC20(lotteryTokenAddress);
-        //if chainlink takes time we go with blockchain approach
-        randomResult = getRandomNumberBlockchain();
-        // getRandomNumberChainlink(randomSeed);
+        emit LotteryStarted();
     }
 
     function enterLottery() public returns (bool) {
@@ -96,10 +116,9 @@ contract LotteryContract is VRFConsumerBase {
             lotteryPlayers.length < lotteryConfig.playersLimit,
             "Max Participation for the Lottery Reached"
         );
-        //add condition if address has already entered
         require(
             lotteryStatus == LotteryStatus.INPROGRESS,
-            "The Lottery is Closed"
+            "The Lottery is not started or closed"
         );
         require(
             lotteryToken.allowance(msg.sender, address(this)) >=
@@ -114,33 +133,32 @@ contract LotteryContract is VRFConsumerBase {
         );
         totalLotteryPool += lotteryConfig.registrationAmount;
         if (lotteryPlayers.length == lotteryConfig.playersLimit) {
-            settleLottery();
+            emit MaxParticipationCompleted(msg.sender);
+            getRandomNumber(lotteryConfig.randomSeed);
         }
         return true;
     }
 
     function settleLottery() internal {
-        // require(msg.sender == adminAddress, "Requires Admin Access");
+        require(
+            areWinnersGenerated,
+            "Lottery Configuration still in progress. Ploease try in a short while"
+        );
+        require(
+            lotteryStatus == LotteryStatus.INPROGRESS,
+            "The Lottery is not started or closed"
+        );
         uint256 adminFees = (totalLotteryPool *
             lotteryConfig.adminFeePercentage) / 100;
         uint256 winnersPool = (totalLotteryPool - adminFees) /
             lotteryConfig.numOfWinners;
-
         for (uint256 i = 0; i < lotteryConfig.numOfWinners; i++) {
-            uint256 winningIndex = randomResult % lotteryConfig.playersLimit;
-            address userAddress = lotteryPlayers[winningIndex];
-            while (winnerAddresses[userAddress]) {
-                randomResult = randomResult * getRandomNumberBlockchain();
-                winningIndex = randomResult % lotteryConfig.playersLimit;
-                userAddress = lotteryPlayers[winningIndex];
-            }
-            winnerAddresses[userAddress] = true;
-            winners.push(userAddress);
+            address userAddress = lotteryPlayers[winnerIndexes[i]];
             lotteryToken.transfer(userAddress, winnersPool);
         }
-        //transfer to Admin
         lotteryToken.transfer(adminAddress, adminFees);
         lotteryStatus = LotteryStatus.CLOSED;
+        emit LotterySettled();
     }
 
     function getRandomNumberBlockchain() internal view returns (uint256) {
@@ -157,24 +175,20 @@ contract LotteryContract is VRFConsumerBase {
         );
         require(
             lotteryStatus == LotteryStatus.CLOSED,
-            "Starting the Lottery requires Admin Access"
+            "Lottery Still in Progress"
         );
         delete lotteryConfig;
-        delete adminAddress;
         delete randomResult;
-        delete lotteryPlayers;
         delete lotteryStatus;
-        delete keyHashVRF;
-        delete feeVRF;
+        delete keyHash;
+        delete fee;
         delete totalLotteryPool;
-        for (uint256 i = 0; i < winners.length; i++) {
-            winnerAddresses[winners[i]] = false;
+        for (uint256 i = 0; i < winnerIndexes.length; i++) {
+            winnerAddresses[lotteryPlayers[i]] = false;
         }
-        delete winners;
+        areWinnersGenerated = false;
+        delete winnerIndexes;
+        delete lotteryPlayers;
+        emit LotteryReset();
     }
-
-    //add logic to reset contract variblaes values
-    // save historic data of Lottery
-    //error handling
-    //random number integration and making sure that the contract always has LINK tokens
 }
