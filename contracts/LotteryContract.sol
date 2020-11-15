@@ -21,7 +21,7 @@ contract LotteryContract is VRFConsumerBase {
     uint256 totalLotteryPool;
 
     IERC20 lotteryToken;
-    LotteryStatus lotteryStatus;
+    LotteryStatus public lotteryStatus;
     LotteryConfig lotteryConfig;
 
     bytes32 internal keyHash;
@@ -180,10 +180,8 @@ contract LotteryContract is VRFConsumerBase {
         delete lotteryConfig;
         delete randomResult;
         delete lotteryStatus;
-        delete keyHash;
-        delete fee;
         delete totalLotteryPool;
-        for (uint256 i = 0; i < winnerIndexes.length; i++) {
+        for (uint256 i = 0; i < lotteryPlayers.length; i++) {
             winnerAddresses[lotteryPlayers[i]] = false;
         }
         areWinnersGenerated = false;
