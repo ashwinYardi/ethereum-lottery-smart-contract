@@ -28,6 +28,7 @@ contract LotteryContract is VRFConsumerBase {
     uint256 internal fee;
     uint256 internal randomResult;
     bool internal areWinnersGenerated;
+    uint256 internal counter;
 
     event MaxParticipationCompleted(address indexed _from);
     event WinnersGenerated();
@@ -66,20 +67,28 @@ contract LotteryContract is VRFConsumerBase {
         override
     {
         randomResult = randomness;
-        for (uint256 i = 0; i < lotteryConfig.numOfWinners; i++) {
+        for (uint256 i = counter; i < lotteryConfig.numOfWinners; i++) {
             uint256 winningIndex = randomResult % lotteryConfig.playersLimit;
             address userAddress = lotteryPlayers[winningIndex];
-            while (winnerAddresses[userAddress]) {
-                randomResult = randomResult * getRandomNumberBlockchain();
-                winningIndex = randomResult % lotteryConfig.playersLimit;
-                userAddress = lotteryPlayers[winningIndex];
+            if (winnerAddresses[userAddress]) {
+                counter = i;
+                getRandomNumber(lotteryConfig.randomSeed);
+                break;
+            } else {
+                winnerAddresses[userAddress] = true;
+                winnerIndexes.push(winningIndex);
+                if (winnerIndexes.length == lotteryConfig.numOfWinners) {
+                    areWinnersGenerated = true;
+                    emit WinnersGenerated();
+                    settleLottery();
+                    break;
+                } else {
+                    counter = i + 1;
+                    getRandomNumber(lotteryConfig.randomSeed);
+                    break;
+                }
             }
-            winnerAddresses[userAddress] = true;
-            winnerIndexes.push(winningIndex);
         }
-        areWinnersGenerated = true;
-        emit WinnersGenerated();
-        settleLottery();
     }
 
     function setLotteryRules(
@@ -177,6 +186,7 @@ contract LotteryContract is VRFConsumerBase {
             lotteryStatus == LotteryStatus.CLOSED,
             "Lottery Still in Progress"
         );
+        delete counter;
         delete lotteryConfig;
         delete randomResult;
         delete lotteryStatus;
