@@ -28,7 +28,6 @@ contract LotteryContract is VRFConsumerBase {
     uint256 internal fee;
     uint256 internal randomResult;
     bool internal areWinnersGenerated;
-    uint256 internal counter;
 
     event MaxParticipationCompleted(address indexed _from);
     event WinnersGenerated();
@@ -67,13 +66,12 @@ contract LotteryContract is VRFConsumerBase {
         override
     {
         randomResult = randomness;
-        for (uint256 i = counter; i < lotteryConfig.numOfWinners; i++) {
+        for (uint256 i = 0; i < lotteryConfig.numOfWinners; i++) {
             uint256 winningIndex = randomResult % lotteryConfig.playersLimit;
             address userAddress = lotteryPlayers[winningIndex];
             if (winnerAddresses[userAddress]) {
-                counter = i;
-                getRandomNumber(lotteryConfig.randomSeed);
-                break;
+                randomResult = getRandomNumberBlockchain(randomness);
+                i--;
             } else {
                 winnerAddresses[userAddress] = true;
                 winnerIndexes.push(winningIndex);
@@ -83,9 +81,7 @@ contract LotteryContract is VRFConsumerBase {
                     settleLottery();
                     break;
                 } else {
-                    counter = i + 1;
-                    getRandomNumber(lotteryConfig.randomSeed);
-                    break;
+                    randomResult = getRandomNumberBlockchain(randomness);
                 }
             }
         }
@@ -170,11 +166,15 @@ contract LotteryContract is VRFConsumerBase {
         emit LotterySettled();
     }
 
-    function getRandomNumberBlockchain() internal view returns (uint256) {
+    function getRandomNumberBlockchain(uint256 randomness)
+        internal
+        view
+        returns (uint256)
+    {
         return
             uint256(
                 keccak256(abi.encodePacked(block.timestamp, block.difficulty))
-            );
+            ) * randomness;
     }
 
     function resetLottery() public {
@@ -186,7 +186,6 @@ contract LotteryContract is VRFConsumerBase {
             lotteryStatus == LotteryStatus.CLOSED,
             "Lottery Still in Progress"
         );
-        delete counter;
         delete lotteryConfig;
         delete randomResult;
         delete lotteryStatus;
