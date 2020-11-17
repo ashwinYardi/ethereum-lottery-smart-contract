@@ -70,7 +70,7 @@ contract LotteryContract is VRFConsumerBase {
             uint256 winningIndex = randomResult % lotteryConfig.playersLimit;
             address userAddress = lotteryPlayers[winningIndex];
             if (winnerAddresses[userAddress]) {
-                randomResult = getRandomNumberBlockchain(randomness);
+                randomResult = getRandomNumberBlockchain(randomness, i);
                 i--;
             } else {
                 winnerAddresses[userAddress] = true;
@@ -81,7 +81,7 @@ contract LotteryContract is VRFConsumerBase {
                     settleLottery();
                     break;
                 } else {
-                    randomResult = getRandomNumberBlockchain(randomness);
+                    randomResult = getRandomNumberBlockchain(randomness, i);
                 }
             }
         }
@@ -166,15 +166,13 @@ contract LotteryContract is VRFConsumerBase {
         emit LotterySettled();
     }
 
-    function getRandomNumberBlockchain(uint256 randomness)
+    function getRandomNumberBlockchain(uint256 randomness, uint256 offset)
         internal
         view
         returns (uint256)
     {
-        return
-            uint256(
-                keccak256(abi.encodePacked(block.timestamp, block.difficulty))
-            ) * randomness;
+        bytes32 offsetBlockhash = blockhash(block.number - offset);
+        return uint256(offsetBlockhash) * randomness;
     }
 
     function resetLottery() public {
