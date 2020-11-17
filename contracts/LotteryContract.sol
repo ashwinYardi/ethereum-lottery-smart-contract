@@ -69,22 +69,18 @@ contract LotteryContract is VRFConsumerBase {
         for (uint256 i = 0; i < lotteryConfig.numOfWinners; i++) {
             uint256 winningIndex = randomResult % lotteryConfig.playersLimit;
             address userAddress = lotteryPlayers[winningIndex];
-            if (winnerAddresses[userAddress]) {
-                randomResult = getRandomNumberBlockchain(randomness, i);
-                i--;
-            } else {
-                winnerAddresses[userAddress] = true;
-                winnerIndexes.push(winningIndex);
-                if (winnerIndexes.length == lotteryConfig.numOfWinners) {
-                    areWinnersGenerated = true;
-                    emit WinnersGenerated();
-                    settleLottery();
-                    break;
-                } else {
-                    randomResult = getRandomNumberBlockchain(randomness, i);
-                }
+            while (winnerAddresses[userAddress]) {
+                randomResult = getRandomNumberBlockchain(randomResult, i);
+                winningIndex = randomResult % lotteryConfig.playersLimit;
+                userAddress = lotteryPlayers[winningIndex];
             }
+            winnerAddresses[userAddress] = true;
+            winnerIndexes.push(winningIndex);
+            randomResult = getRandomNumberBlockchain(randomResult, i);
         }
+        areWinnersGenerated = true;
+        emit WinnersGenerated();
+        settleLottery();
     }
 
     function setLotteryRules(
@@ -172,7 +168,7 @@ contract LotteryContract is VRFConsumerBase {
         returns (uint256)
     {
         bytes32 offsetBlockhash = blockhash(block.number - offset);
-        return uint256(offsetBlockhash) * randomness;
+        return uint256(offsetBlockhash) + randomness;
     }
 
     function resetLottery() public {
