@@ -74,10 +74,21 @@ contract LotteryContract is VRFConsumerBase {
         for (uint256 i = 0; i < lotteryConfig.numOfWinners; i++) {
             uint256 winningIndex = randomResult % lotteryConfig.playersLimit;
             address userAddress = lotteryPlayers[winningIndex];
+            uint256 counter = 0;
             while (winnerAddresses[userAddress]) {
                 randomResult = randomResult + getRandomNumberBlockchain(i);
                 winningIndex = randomResult % lotteryConfig.playersLimit;
                 userAddress = lotteryPlayers[winningIndex];
+                counter++;
+                if (counter == lotteryConfig.playersLimit) {
+                    while (winnerAddresses[userAddress]) {
+                        winningIndex =
+                            (winningIndex + 1) %
+                            lotteryConfig.playersLimit;
+                        userAddress = lotteryPlayers[winningIndex];
+                    }
+                    counter = 0;
+                }
             }
             winnerAddresses[userAddress] = true;
             winnerIndexes.push(winningIndex);
@@ -103,6 +114,10 @@ contract LotteryContract is VRFConsumerBase {
         require(
             lotteryStatus == LotteryStatus.NOTSTARTED,
             "Error: An existing lottery is in progress"
+        );
+        require(
+            numOfWinners < playersLimit,
+            "Number of winners should be less than the number of players"
         );
         lotteryConfig = LotteryConfig(
             numOfWinners,
