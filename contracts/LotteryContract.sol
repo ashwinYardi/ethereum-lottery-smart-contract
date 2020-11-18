@@ -2,8 +2,13 @@ pragma solidity ^0.6.6;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@chainlink/contracts/src/v0.6/VRFConsumerBase.sol";
+import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/utils/Address.sol";
 
 contract LotteryContract is VRFConsumerBase {
+    using SafeMath for uint256;
+    using Address for address;
+
     struct LotteryConfig {
         uint256 numOfWinners;
         uint256 playersLimit;
@@ -70,13 +75,13 @@ contract LotteryContract is VRFConsumerBase {
             uint256 winningIndex = randomResult % lotteryConfig.playersLimit;
             address userAddress = lotteryPlayers[winningIndex];
             while (winnerAddresses[userAddress]) {
-                randomResult = getRandomNumberBlockchain(randomResult, i);
+                randomResult = randomResult + getRandomNumberBlockchain(i);
                 winningIndex = randomResult % lotteryConfig.playersLimit;
                 userAddress = lotteryPlayers[winningIndex];
             }
             winnerAddresses[userAddress] = true;
             winnerIndexes.push(winningIndex);
-            randomResult = getRandomNumberBlockchain(randomResult, i);
+            randomResult = randomResult + getRandomNumberBlockchain(i);
         }
         areWinnersGenerated = true;
         emit WinnersGenerated();
@@ -162,13 +167,13 @@ contract LotteryContract is VRFConsumerBase {
         emit LotterySettled();
     }
 
-    function getRandomNumberBlockchain(uint256 randomness, uint256 offset)
+    function getRandomNumberBlockchain(uint256 offset)
         internal
         view
         returns (uint256)
     {
         bytes32 offsetBlockhash = blockhash(block.number - offset);
-        return uint256(offsetBlockhash) + randomness;
+        return uint256(offsetBlockhash);
     }
 
     function resetLottery() public {
