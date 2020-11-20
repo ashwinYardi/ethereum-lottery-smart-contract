@@ -16,6 +16,7 @@ contract LotteryContract is VRFConsumerBase {
         uint256 adminFeePercentage;
         address lotteryTokenAddress;
         uint256 randomSeed;
+        uint256 startedAt;
     }
 
     address[] lotteryPlayers;
@@ -36,10 +37,21 @@ contract LotteryContract is VRFConsumerBase {
     bool internal isRandomNumberGenerated;
 
     event MaxParticipationCompleted(address indexed _from);
-    event RandomNumberGenerated(address indexed _from);
-    event WinnersGenerated();
+    
+    event RandomNumberGenerated(uint256 indexed randomness);
+    
+    event WinnersGenerated(uint256[] winnerIndexes);
+    
     event LotterySettled();
-    event LotteryStarted();
+
+    event LotteryStarted(
+        address indexed lotteryTokenAddress,
+        uint256 playersLimit,
+        uint256 numOfWinners,
+        uint256 registrationAmount,
+        uint256 startedAt
+    );
+
     event LotteryReset();
 
     /**
@@ -104,7 +116,7 @@ contract LotteryContract is VRFConsumerBase {
     {
         randomResult = randomness;
         isRandomNumberGenerated = true;
-        emit RandomNumberGenerated(msg.sender);
+        emit RandomNumberGenerated(randomness);
     }
 
     /**
@@ -146,11 +158,18 @@ contract LotteryContract is VRFConsumerBase {
             registrationAmount,
             adminFeePercentage,
             lotteryTokenAddress,
-            randomSeed
+            randomSeed,
+            block.timestamp
         );
         lotteryStatus = LotteryStatus.INPROGRESS;
         lotteryToken = IERC20(lotteryTokenAddress);
-        emit LotteryStarted();
+        emit LotteryStarted(
+            lotteryTokenAddress,
+            playersLimit,
+            numOfWinners,
+            registrationAmount,
+            block.timestamp
+        );
     }
 
     /**
@@ -174,11 +193,6 @@ contract LotteryContract is VRFConsumerBase {
         require(
             lotteryStatus == LotteryStatus.INPROGRESS,
             "The Lottery is not started or closed"
-        );
-        require(
-            lotteryToken.allowance(msg.sender, address(this)) >=
-                lotteryConfig.registrationAmount,
-            "Contract is not allowed to spend this"
         );
         lotteryPlayers.push(msg.sender);
         lotteryToken.transferFrom(
@@ -239,7 +253,7 @@ contract LotteryContract is VRFConsumerBase {
             randomResult = randomResult + getRandomNumberBlockchain(i);
         }
         areWinnersGenerated = true;
-        emit WinnersGenerated();
+        emit WinnersGenerated(winnerIndexes);
         uint256 adminFees = (totalLotteryPool *
             lotteryConfig.adminFeePercentage) / 100;
         uint256 winnersPool = (totalLotteryPool - adminFees) /
