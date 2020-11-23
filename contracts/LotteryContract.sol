@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 
 contract LotteryContract is VRFConsumerBase {
-    using SafeMath for uint256;
     using Address for address;
 
     struct LotteryConfig {
@@ -37,11 +36,11 @@ contract LotteryContract is VRFConsumerBase {
     bool internal isRandomNumberGenerated;
 
     event MaxParticipationCompleted(address indexed _from);
-    
+
     event RandomNumberGenerated(uint256 indexed randomness);
-    
+
     event WinnersGenerated(uint256[] winnerIndexes);
-    
+
     event LotterySettled();
 
     event LotteryStarted(
@@ -149,7 +148,7 @@ contract LotteryContract is VRFConsumerBase {
             "Error: An existing lottery is in progress"
         );
         require(
-            numOfWinners <= playersLimit / 2,
+            numOfWinners <= playersLimit.div(2),
             "Number of winners should be less than or equal to half the number of players"
         );
         lotteryConfig = LotteryConfig(
@@ -200,7 +199,9 @@ contract LotteryContract is VRFConsumerBase {
             address(this),
             lotteryConfig.registrationAmount
         );
-        totalLotteryPool += lotteryConfig.registrationAmount;
+        totalLotteryPool = totalLotteryPool.add(
+            lotteryConfig.registrationAmount
+        );
         if (lotteryPlayers.length == lotteryConfig.playersLimit) {
             emit MaxParticipationCompleted(msg.sender);
             getRandomNumber(lotteryConfig.randomSeed);
@@ -231,18 +232,18 @@ contract LotteryContract is VRFConsumerBase {
             lotteryStatus == LotteryStatus.INPROGRESS,
             "The Lottery is not started or closed"
         );
-        for (uint256 i = 0; i < lotteryConfig.numOfWinners; i++) {
-            uint256 winningIndex = randomResult % lotteryConfig.playersLimit;
+        for (uint256 i = 0; i < lotteryConfig.numOfWinners; i = i.add(1)) {
+            uint256 winningIndex = randomResult.mod(lotteryConfig.playersLimit);
             uint256 counter = 0;
             while (winnerAddresses[winningIndex] != address(0)) {
-                randomResult = randomResult + getRandomNumberBlockchain(i);
-                winningIndex = randomResult % lotteryConfig.playersLimit;
-                counter++;
+                randomResult = getRandomNumberBlockchain(i, randomResult);
+                winningIndex = randomResult.mod(lotteryConfig.playersLimit);
+                counter = counter.add(1);
                 if (counter == lotteryConfig.playersLimit) {
                     while (winnerAddresses[winningIndex] != address(0)) {
-                        winningIndex =
-                            (winningIndex + 1) %
-                            lotteryConfig.playersLimit;
+                        winningIndex = (winningIndex.add(1)).mod(
+                            lotteryConfig.playersLimit
+                        );
                     }
                     counter = 0;
                 }
@@ -250,15 +251,17 @@ contract LotteryContract is VRFConsumerBase {
             address userAddress = lotteryPlayers[winningIndex];
             winnerAddresses[winningIndex] = userAddress;
             winnerIndexes.push(winningIndex);
-            randomResult = randomResult + getRandomNumberBlockchain(i);
+            randomResult = getRandomNumberBlockchain(i, randomResult);
         }
         areWinnersGenerated = true;
         emit WinnersGenerated(winnerIndexes);
-        uint256 adminFees = (totalLotteryPool *
-            lotteryConfig.adminFeePercentage) / 100;
-        uint256 winnersPool = (totalLotteryPool - adminFees) /
-            lotteryConfig.numOfWinners;
-        for (uint256 i = 0; i < lotteryConfig.numOfWinners; i++) {
+        uint256 adminFees = (
+            (totalLotteryPool.mul(lotteryConfig.adminFeePercentage)).div(100)
+        );
+        uint256 winnersPool = (totalLotteryPool.sub(adminFees)).div(
+            lotteryConfig.numOfWinners
+        );
+        for (uint256 i = 0; i < lotteryConfig.numOfWinners; i = i.add(1)) {
             address userAddress = lotteryPlayers[winnerIndexes[i]];
             lotteryToken.transfer(userAddress, winnersPool);
         }
@@ -270,13 +273,22 @@ contract LotteryContract is VRFConsumerBase {
     /**
      * @dev Generates a random number based on the blockHash and random offset
      */
-    function getRandomNumberBlockchain(uint256 offset)
+    function getRandomNumberBlockchain(uint256 offset, uint256 randomness)
         internal
         view
         returns (uint256)
     {
-        bytes32 offsetBlockhash = blockhash(block.number - offset);
-        return uint256(offsetBlockhash);
+        bytes32 offsetBlockhash = blockhash(block.number.sub(offset));
+        uint256 randomBlockchainNumber = uint256(offsetBlockhash);
+        uint256 finalRandomNumber = randomness + randomBlockchainNumber;
+        if (finalRandomNumber >= randomness) {
+            return finalRandomNumber;
+        } else {
+            if (randomness >= randomBlockchainNumber) {
+                return randomness.sub(randomBlockchainNumber);
+            }
+            return randomBlockchainNumber.sub(randomness);
+        }
     }
 
     /**
@@ -303,7 +315,7 @@ contract LotteryContract is VRFConsumerBase {
         delete randomResult;
         delete lotteryStatus;
         delete totalLotteryPool;
-        for (uint256 i = 0; i < lotteryPlayers.length; i++) {
+        for (uint256 i = 0; i < lotteryPlayers.length; i = i.add(1)) {
             delete winnerAddresses[i];
         }
         isRandomNumberGenerated = false;
