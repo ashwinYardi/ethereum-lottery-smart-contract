@@ -1,11 +1,12 @@
-pragma solidity ^0.6.6;
+pragma solidity ^0.6.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@chainlink/contracts/src/v0.6/VRFConsumerBase.sol";
-import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "./VRFConsumerBase.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract LotteryContract is VRFConsumerBase {
+contract LotteryContract is VRFConsumerBase, ERC20, ReentrancyGuard {
     using Address for address;
 
     struct LotteryConfig {
@@ -18,12 +19,14 @@ contract LotteryContract is VRFConsumerBase {
         uint256 startedAt;
     }
 
-    address[] lotteryPlayers;
-    address adminAddress;
+    address[] public lotteryPlayers;
+    address public adminAddress;
     enum LotteryStatus {NOTSTARTED, INPROGRESS, CLOSED}
-    mapping(uint256 => address) winnerAddresses;
-    uint256[] winnerIndexes;
-    uint256 totalLotteryPool;
+    mapping(uint256 => address) public winnerAddresses;
+    uint256[] public winnerIndexes;
+    uint256 public totalLotteryPool;
+    uint256 public adminFeesAmount;
+    uint256 public rewardPoolAmount;
 
     IERC20 lotteryToken;
     LotteryStatus public lotteryStatus;
@@ -60,6 +63,8 @@ contract LotteryContract is VRFConsumerBase {
      *
      * It also sets the required fees, keyHash etc. for the ChainLink Oracle RNG
      *
+     * Also initializes the LOT ERC20 TOKEN that is minted/burned by the participating lottery players.
+     *
      * The adminAdress value is immutable along with the initial
      * configuration of VRF Smart Contract. They can only be set once during
      * construction.
@@ -70,6 +75,7 @@ contract LotteryContract is VRFConsumerBase {
             0xdD3782915140c8f3b190B5D67eAc6dc5760C46E9, // VRF Coordinator
             0xa36085F69e2889c224210F603D836748e7dC0088 // LINK Token
         )
+        ERC20("LotteryTokens", "LOT") //Internal LOT ERC20 token
     {
         adminAddress = msg.sender;
         lotteryStatus = LotteryStatus.NOTSTARTED;
@@ -175,7 +181,13 @@ contract LotteryContract is VRFConsumerBase {
      * @dev Player enters the lottery and the registration amount is
      * transferred from the player to the contract.
      *
+     * Returns participant's index. This is similar to unique registration id.
      * Emits an {MaxParticipationCompleted} event indicating that all the required players have entered the lottery.
+     *
+     * The participant is also issued an equal amount of LOT tokens once he registers for the lottery.
+     * This LOT tokens are fundamental to the lottery contract and are used internally.
+     * The winners will need to burn their LOT tokens to claim the lottery winnings.
+     * The other participants of the lottery can keep hold of these tokens and use for other applications.
      *
      * Requirements:
      *
@@ -184,7 +196,7 @@ contract LotteryContract is VRFConsumerBase {
      * - Number of players allowed to enter in the lottery should be
      *   less than or equal to the allowed players `lotteryConfig.playersLimit`.
      */
-    function enterLottery() public returns (bool) {
+    function enterLottery() public returns (uint256) {
         require(
             lotteryPlayers.length < lotteryConfig.playersLimit,
             "Max Participation for the Lottery Reached"
@@ -202,21 +214,21 @@ contract LotteryContract is VRFConsumerBase {
         totalLotteryPool = totalLotteryPool.add(
             lotteryConfig.registrationAmount
         );
+        _mint(address(msg.sender), lotteryConfig.registrationAmount);
         if (lotteryPlayers.length == lotteryConfig.playersLimit) {
             emit MaxParticipationCompleted(msg.sender);
             getRandomNumber(lotteryConfig.randomSeed);
         }
-        return true;
+        return (lotteryPlayers.length).sub(1);
     }
 
     /**
      * @dev Settles the lottery, the winners are calculated based on
-     * the random number generated and the winnings are transferred from
-     * the contract to the winning players. The Admin fee is calculated and
+     * the random number generated. The Admin fee is calculated and
      * transferred back to Admin `adminAddress`.
      *
      * Emits an {WinnersGenerated} event indicating that the winners for the lottery have been generated.
-     * Emits {LotterySettled} event indicating that the winnings have been transferred to the Admin and the winners.
+     * Emits {LotterySettled} event indicating that the winnings have been transferred to the Admin and the Lottery is closed.
      *
      * Requirements:
      *
@@ -226,7 +238,7 @@ contract LotteryContract is VRFConsumerBase {
     function settleLottery() public {
         require(
             isRandomNumberGenerated,
-            "Lottery Configuration still in progress. Ploease try in a short while"
+            "Lottery Configuration still in progress. Please try in a short while"
         );
         require(
             lotteryStatus == LotteryStatus.INPROGRESS,
@@ -248,26 +260,47 @@ contract LotteryContract is VRFConsumerBase {
                     counter = 0;
                 }
             }
-            address userAddress = lotteryPlayers[winningIndex];
-            winnerAddresses[winningIndex] = userAddress;
+            winnerAddresses[winningIndex] = lotteryPlayers[winningIndex];
             winnerIndexes.push(winningIndex);
             randomResult = getRandomNumberBlockchain(i, randomResult);
         }
         areWinnersGenerated = true;
         emit WinnersGenerated(winnerIndexes);
-        uint256 adminFees = (
+        adminFeesAmount = (
             (totalLotteryPool.mul(lotteryConfig.adminFeePercentage)).div(100)
         );
-        uint256 winnersPool = (totalLotteryPool.sub(adminFees)).div(
+        rewardPoolAmount = (totalLotteryPool.sub(adminFeesAmount)).div(
             lotteryConfig.numOfWinners
         );
-        for (uint256 i = 0; i < lotteryConfig.numOfWinners; i = i.add(1)) {
-            address userAddress = lotteryPlayers[winnerIndexes[i]];
-            lotteryToken.transfer(userAddress, winnersPool);
-        }
-        lotteryToken.transfer(adminAddress, adminFees);
         lotteryStatus = LotteryStatus.CLOSED;
+
+        lotteryToken.transfer(adminAddress, adminFeesAmount);
+
         emit LotterySettled();
+    }
+
+    /**
+     * @dev The winners of the lottery can call this function to transfer their winnings
+     * from the lottery contract to their own address. The winners will need to burn their
+     * LOT tokens to claim the lottery rewards. This is executed by the lottery contract itself.
+     *
+     *
+     * Requirements:
+     *
+     * - The Lottery is settled i.e. the lotteryStatus is CLOSED.
+     */
+    function collectRewards() public nonReentrant {
+        require(
+            lotteryStatus == LotteryStatus.CLOSED,
+            "The Lottery is not settled. Please try in a short while."
+        );
+        for (uint256 i = 0; i < lotteryConfig.numOfWinners; i = i.add(1)) {
+            if (address(msg.sender) == winnerAddresses[winnerIndexes[i]]) {
+                _burn(address(msg.sender), lotteryConfig.registrationAmount);
+                lotteryToken.transfer(address(msg.sender), rewardPoolAmount);
+                winnerAddresses[winnerIndexes[i]] = address(0);
+            }
+        }
     }
 
     /**
@@ -311,10 +344,16 @@ contract LotteryContract is VRFConsumerBase {
             lotteryStatus == LotteryStatus.CLOSED,
             "Lottery Still in Progress"
         );
+        uint256 tokenBalance = lotteryToken.balanceOf(address(this));
+        if (tokenBalance > 0) {
+            lotteryToken.transfer(adminAddress, tokenBalance);
+        }
         delete lotteryConfig;
         delete randomResult;
         delete lotteryStatus;
         delete totalLotteryPool;
+        delete adminFeesAmount;
+        delete rewardPoolAmount;
         for (uint256 i = 0; i < lotteryPlayers.length; i = i.add(1)) {
             delete winnerAddresses[i];
         }
