@@ -4,8 +4,9 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "./VRFConsumerBase.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract LotteryContract is VRFConsumerBase, ERC20 {
+contract LotteryContract is VRFConsumerBase, ERC20, ReentrancyGuard {
     using Address for address;
 
     struct LotteryConfig {
@@ -288,16 +289,16 @@ contract LotteryContract is VRFConsumerBase, ERC20 {
      *
      * - The Lottery is settled i.e. the lotteryStatus is CLOSED.
      */
-    function collectRewards() public {
+    function collectRewards() public nonReentrant {
         require(
             lotteryStatus == LotteryStatus.CLOSED,
             "The Lottery is not settled. Please try in a short while."
         );
-        for (uint256 i = 0; i < winnerIndexes.length; i = i.add(1)) {
-            if (address(msg.sender) == winnerAddresses[i]) {
-                winnerAddresses[i] = address(0);
+        for (uint256 i = 0; i < lotteryConfig.numOfWinners; i = i.add(1)) {
+            if (address(msg.sender) == winnerAddresses[winnerIndexes[i]]) {
                 _burn(address(msg.sender), lotteryConfig.registrationAmount);
                 lotteryToken.transfer(address(msg.sender), rewardPoolAmount);
+                winnerAddresses[winnerIndexes[i]] = address(0);
             }
         }
     }
