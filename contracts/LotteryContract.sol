@@ -1,11 +1,12 @@
 pragma solidity ^0.6.6;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@chainlink/contracts/src/v0.6/VRFConsumerBase.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 
-contract LotteryContract is VRFConsumerBase {
+contract LotteryContract is VRFConsumerBase, ERC20 {
     using Address for address;
 
     struct LotteryConfig {
@@ -18,12 +19,14 @@ contract LotteryContract is VRFConsumerBase {
         uint256 startedAt;
     }
 
-    address[] lotteryPlayers;
-    address adminAddress;
+    address[] public lotteryPlayers;
+    address public adminAddress;
     enum LotteryStatus {NOTSTARTED, INPROGRESS, CLOSED}
-    mapping(uint256 => address) winnerAddresses;
-    uint256[] winnerIndexes;
-    uint256 totalLotteryPool;
+    mapping(uint256 => address) public winnerAddresses;
+    uint256[] public winnerIndexes;
+    uint256 public totalLotteryPool;
+    uint256 public adminFeesAmount;
+    uint256 public rewardPoolAmount;
 
     IERC20 lotteryToken;
     LotteryStatus public lotteryStatus;
@@ -70,6 +73,7 @@ contract LotteryContract is VRFConsumerBase {
             0xdD3782915140c8f3b190B5D67eAc6dc5760C46E9, // VRF Coordinator
             0xa36085F69e2889c224210F603D836748e7dC0088 // LINK Token
         )
+        ERC20("LotteryTokens", "LOT")
     {
         adminAddress = msg.sender;
         lotteryStatus = LotteryStatus.NOTSTARTED;
@@ -175,6 +179,7 @@ contract LotteryContract is VRFConsumerBase {
      * @dev Player enters the lottery and the registration amount is
      * transferred from the player to the contract.
      *
+     * Returns participant's index. This is similar to unique registration id.
      * Emits an {MaxParticipationCompleted} event indicating that all the required players have entered the lottery.
      *
      * Requirements:
@@ -184,7 +189,7 @@ contract LotteryContract is VRFConsumerBase {
      * - Number of players allowed to enter in the lottery should be
      *   less than or equal to the allowed players `lotteryConfig.playersLimit`.
      */
-    function enterLottery() public returns (bool) {
+    function enterLottery() public returns (uint256) {
         require(
             lotteryPlayers.length < lotteryConfig.playersLimit,
             "Max Participation for the Lottery Reached"
@@ -202,11 +207,12 @@ contract LotteryContract is VRFConsumerBase {
         totalLotteryPool = totalLotteryPool.add(
             lotteryConfig.registrationAmount
         );
+        _mint(address(msg.sender), lotteryConfig.registrationAmount);
         if (lotteryPlayers.length == lotteryConfig.playersLimit) {
             emit MaxParticipationCompleted(msg.sender);
             getRandomNumber(lotteryConfig.randomSeed);
         }
-        return true;
+        return lotteryPlayers.length;
     }
 
     /**
@@ -248,26 +254,32 @@ contract LotteryContract is VRFConsumerBase {
                     counter = 0;
                 }
             }
-            address userAddress = lotteryPlayers[winningIndex];
-            winnerAddresses[winningIndex] = userAddress;
+            winnerAddresses[winningIndex] = lotteryPlayers[winningIndex];
             winnerIndexes.push(winningIndex);
             randomResult = getRandomNumberBlockchain(i, randomResult);
         }
         areWinnersGenerated = true;
         emit WinnersGenerated(winnerIndexes);
-        uint256 adminFees = (
+        adminFeesAmount = (
             (totalLotteryPool.mul(lotteryConfig.adminFeePercentage)).div(100)
         );
-        uint256 winnersPool = (totalLotteryPool.sub(adminFees)).div(
+        rewardPoolAmount = (totalLotteryPool.sub(adminFeesAmount)).div(
             lotteryConfig.numOfWinners
         );
-        for (uint256 i = 0; i < lotteryConfig.numOfWinners; i = i.add(1)) {
-            address userAddress = lotteryPlayers[winnerIndexes[i]];
-            lotteryToken.transfer(userAddress, winnersPool);
-        }
-        lotteryToken.transfer(adminAddress, adminFees);
         lotteryStatus = LotteryStatus.CLOSED;
+
+        lotteryToken.transfer(adminAddress, adminFeesAmount);
+
         emit LotterySettled();
+    }
+
+    function collectRewards() public {
+        for (uint256 i = 0; i < winnerIndexes.length; i = i.add(1)) {
+            if (address(msg.sender) == winnerAddresses[lotteryPlayers[i]]) {
+                _burn(address(msg.sender), lotteryConfig.registrationAmount);
+                lotteryToken.transfer(address(msg.sender), rewardPoolAmount);
+            }
+        }
     }
 
     /**
@@ -311,10 +323,16 @@ contract LotteryContract is VRFConsumerBase {
             lotteryStatus == LotteryStatus.CLOSED,
             "Lottery Still in Progress"
         );
+        uint256 tokenBalance = lotteryToken.balanceOf(address(this));
+        if (tokenBalance > 0) {
+            lotteryToken.transfer(adminAddress, tokenBalance);
+        }
         delete lotteryConfig;
         delete randomResult;
         delete lotteryStatus;
         delete totalLotteryPool;
+        delete adminFeesAmount;
+        delete rewardPoolAmount;
         for (uint256 i = 0; i < lotteryPlayers.length; i = i.add(1)) {
             delete winnerAddresses[i];
         }
