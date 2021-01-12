@@ -63,7 +63,7 @@ contract LotteryContract is VRFConsumerBase, ERC20 {
      * It also sets the required fees, keyHash etc. for the ChainLink Oracle RNG
      *
      * Also initializes the LOT ERC20 TOKEN that is minted/burned by the participating lottery players.
-     * 
+     *
      * The adminAdress value is immutable along with the initial
      * configuration of VRF Smart Contract. They can only be set once during
      * construction.
@@ -282,7 +282,7 @@ contract LotteryContract is VRFConsumerBase, ERC20 {
      * @dev The winners of the lottery can call this function to transfer their winnings
      * from the lottery contract to their own address. The winners will need to burn their
      * LOT tokens to claim the lottery rewards. This is executed by the lottery contract itself.
-     * 
+     *
      *
      * Requirements:
      *
@@ -295,6 +295,7 @@ contract LotteryContract is VRFConsumerBase, ERC20 {
         );
         for (uint256 i = 0; i < winnerIndexes.length; i = i.add(1)) {
             if (address(msg.sender) == winnerAddresses[i]) {
+                winnerAddresses[i] = address(0);
                 _burn(address(msg.sender), lotteryConfig.registrationAmount);
                 lotteryToken.transfer(address(msg.sender), rewardPoolAmount);
             }
