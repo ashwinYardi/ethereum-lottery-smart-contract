@@ -218,7 +218,7 @@ contract LotteryContract is VRFConsumerBase, ERC20 {
             emit MaxParticipationCompleted(msg.sender);
             getRandomNumber(lotteryConfig.randomSeed);
         }
-        return lotteryPlayers.length;
+        return (lotteryPlayers.length).sub(1);
     }
 
     /**
