@@ -1,9 +1,8 @@
-pragma solidity ^0.6.6;
+pragma solidity ^0.6.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@chainlink/contracts/src/v0.6/VRFConsumerBase.sol";
-import "@openzeppelin/contracts/math/SafeMath.sol";
+import "./VRFConsumerBase.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 
 contract LotteryContract is VRFConsumerBase, ERC20 {
@@ -275,7 +274,7 @@ contract LotteryContract is VRFConsumerBase, ERC20 {
 
     function collectRewards() public {
         for (uint256 i = 0; i < winnerIndexes.length; i = i.add(1)) {
-            if (address(msg.sender) == winnerAddresses[lotteryPlayers[i]]) {
+            if (address(msg.sender) == winnerAddresses[i]) {
                 _burn(address(msg.sender), lotteryConfig.registrationAmount);
                 lotteryToken.transfer(address(msg.sender), rewardPoolAmount);
             }
